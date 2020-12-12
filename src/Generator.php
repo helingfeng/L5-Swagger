@@ -50,23 +50,42 @@ class Generator
 
     public function __construct()
     {
-        $this->annotationsDir = config('l5-swagger.paths.annotations');
+        $this->initConfig();
+
         $this->docDir = config('l5-swagger.paths.docs');
-        $this->docsFile = $this->docDir.'/'.config('l5-swagger.paths.docs_json', 'api-docs.json');
-        $this->yamlDocsFile = $this->docDir.'/'.config('l5-swagger.paths.docs_yaml', 'api-docs.yaml');
+        $this->yamlDocsFile = $this->docDir . '/' . config('l5-swagger.paths.docs_yaml', 'api-docs.yaml');
         $this->excludedDirs = config('l5-swagger.paths.excludes');
         $this->constants = config('l5-swagger.constants') ?: [];
         $this->yamlCopyRequired = config('l5-swagger.generate_yaml_copy', false);
     }
 
+    protected function initConfig($annotations = null, $docs_json = null)
+    {
+        $this->annotationsDir = $annotations ?? config('l5-swagger.paths.annotations');
+        $this->docsFile = $this->docDir . '/' . ($docs_json ?? config('l5-swagger.paths.docs_json', 'api-docs.json'));
+        return $this;
+    }
+
     public static function generateDocs()
     {
-        (new static)->prepareDirectory()
+        (new static)->initConfig()->prepareDirectory()
             ->defineConstants()
             ->scanFilesForDocumentation()
             ->populateServers()
             ->saveJson()
             ->makeYamlCopy();
+
+        $docs = config('l5-swagger.multi_docs');
+        if (!empty($docs)) {
+            foreach ($docs as $key => $doc) {
+                (new static)->initConfig($doc['annotations'], "api-docs-{$key}.json")->prepareDirectory()
+                    ->defineConstants()
+                    ->scanFilesForDocumentation()
+                    ->populateServers()
+                    ->saveJson()
+                    ->makeYamlCopy();
+            }
+        }
     }
 
     /**
@@ -76,16 +95,13 @@ class Generator
      */
     protected function prepareDirectory()
     {
-        if (File::exists($this->docDir) && ! is_writable($this->docDir)) {
+        if (File::exists($this->docDir) && !is_writable($this->docDir)) {
             throw new L5SwaggerException('Documentation storage directory is not writable');
         }
 
-        // delete all existing documentation
-        if (File::exists($this->docDir)) {
-            File::deleteDirectory($this->docDir);
+        if (!File::exists($this->docDir)) {
+            File::makeDirectory($this->docDir);
         }
-
-        File::makeDirectory($this->docDir);
 
         return $this;
     }
@@ -97,7 +113,7 @@ class Generator
      */
     protected function defineConstants()
     {
-        if (! empty($this->constants)) {
+        if (!empty($this->constants)) {
             foreach ($this->constants as $key => $value) {
                 defined($key) || define($key, $value);
             }
@@ -120,7 +136,7 @@ class Generator
             );
         }
 
-        if (! $this->isOpenApi()) {
+        if (!$this->isOpenApi()) {
             $this->swagger = \Swagger\scan(
                 $this->annotationsDir,
                 ['exclude' => $this->excludedDirs]
@@ -139,14 +155,14 @@ class Generator
     {
         if (config('l5-swagger.paths.base') !== null) {
             if ($this->isOpenApi()) {
-                if (! is_array($this->swagger->servers)) {
+                if (!is_array($this->swagger->servers)) {
                     $this->swagger->servers = [];
                 }
 
                 $this->swagger->servers[] = new \OpenApi\Annotations\Server(['url' => config('l5-swagger.paths.base')]);
             }
 
-            if (! $this->isOpenApi()) {
+            if (!$this->isOpenApi()) {
                 $this->swagger->basePath = config('l5-swagger.paths.base');
             }
         }
